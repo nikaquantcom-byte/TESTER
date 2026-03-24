@@ -1,13 +1,5 @@
-"""
-MEGA Optimizer V3 — FIXED
-11 MA types, 8 trigger types, Heiken Ashi, LinReg, all confluence, all management.
-4 PHASES: Signal Tournament -> Confluence -> Trade Management -> Walk-Forward
-
-Usage (from C:\Users\Administrator\Desktop\10min\TESTER):
-    python -m mega_v3_fixed --data XAUUSD_M10.csv --top 50
-    python -m mega_v3_fixed --data XAUUSD_M10.csv --skip-wf
-    python -m mega_v3_fixed --data XAUUSD_M10.csv --skip-phase1 --phase1-file output_v3/phase1_results.pkl
-"""
+# NikaQuant MEGA Optimizer V3 -- FIXED
+# Run from TESTER folder: python -m mega_v3_fixed --data XAUUSD_M10.csv --top 50
 
 import numpy as np
 import pandas as pd
@@ -18,7 +10,6 @@ import os
 import sys
 from pathlib import Path
 
-# Ensure nika_optimizer is importable from parent dir
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from nika_optimizer.data_loader import load_ohlcv, prepare_multi_timeframe
@@ -43,7 +34,6 @@ from nika_optimizer.grid_search_v3 import (
     BE_GRID, TRAIL_ACT, TRAIL_OFF, HARD_STOP, PSAR_EXIT, SPREAD_GRID,
 )
 
-# FIXED: import from walk_forward_v3 (not walk_forward_v2)
 from mega_v3_fixed.walk_forward_v3 import WFConfig, run_walk_forward
 
 
@@ -80,7 +70,6 @@ def main():
 
     t_start = time.time()
 
-    # -- Step 1: Load Data --
     print(f"\n[Step 1] Loading data...")
     ohlcv_df = load_ohlcv(args.data, sep=args.sep)
     mtf = prepare_multi_timeframe(ohlcv_df, ['1h', '4h'])
@@ -97,7 +86,7 @@ def main():
     n_days = n_bars // 144
     print(f"  {n_bars:,} bars | ~{n_days} trading days")
 
-    # -- Phase 1: Signal Tournament --
+    # -- Phase 1 --
     if args.skip_phase1 and args.phase1_file:
         print(f"\n[Phase 1] Loading from {args.phase1_file}")
         p1 = load_results(args.phase1_file)
@@ -109,7 +98,7 @@ def main():
     t_p1 = time.time()
     print(f"  Phase 1 time: {(t_p1 - t_start)/60:.1f} min")
 
-    # -- Phase 2: Confluence Sweep --
+    # -- Phase 2 --
     top_engines = [eng for eng, res, score in p1[:args.top] if score > 0]
     if not top_engines:
         top_engines = [p1[0][0]]
@@ -120,7 +109,7 @@ def main():
     t_p2 = time.time()
     print(f"  Phase 2 time: {(t_p2 - t_p1)/60:.1f} min")
 
-    # -- Phase 3: Trade Management Sweep --
+    # -- Phase 3 --
     p3 = []
     if not args.skip_phase3 and len(p2) > 0:
         top_phase2 = [r for r in p2[:args.phase2_top] if r[3] > 0]
@@ -136,7 +125,8 @@ def main():
         print(f"  {'-'*120}")
         for i, (eng, conf, tp, score, res) in enumerate(p3[:20]):
             tname = TRIG_NAMES[eng.trigger_type]
-            if eng.trigger_type == 0: tname = MA_NAMES[eng.ma_type]
+            if eng.trigger_type == 0:
+                tname = MA_NAMES[eng.ma_type]
             print(f"  {i+1:>3} | {score:7.1f} | {res[R_PROFIT_FACTOR]:6.2f} | {res[R_WIN_RATE]:5.1f} | "
                   f"{int(res[R_TOTAL_TRADES]):>6} | {res[R_MAX_DRAWDOWN_PCT]:6.1f} | "
                   f"${res[R_NET_PROFIT]:>9.2f} | "
@@ -150,7 +140,7 @@ def main():
         t_p3 = time.time()
         print("\n[Phase 3] Skipped.")
 
-    # -- Phase 4: Walk-Forward (FIXED) --
+    # -- Phase 4: Walk-Forward --
     wf_results = []
     if not args.skip_wf:
         if p3:
@@ -164,7 +154,6 @@ def main():
         print(f"\n[Phase 4] Walk-Forward on top {len(wf_candidates)} configs...")
         print(f"  Splits: {args.wf_splits} | Train: {args.wf_train_pct*100:.0f}% | Min trades: {args.wf_min_trades}")
 
-        # FIXED: WFConfig uses n_splits / train_pct / min_trades
         wf_cfg = WFConfig(
             n_splits=args.wf_splits,
             train_pct=args.wf_train_pct,
@@ -176,10 +165,10 @@ def main():
             conf = candidate[1]
             tp   = candidate[2]
             tname = TRIG_NAMES[eng.trigger_type]
-            if eng.trigger_type == 0: tname = MA_NAMES[eng.ma_type]
+            if eng.trigger_type == 0:
+                tname = MA_NAMES[eng.ma_type]
             print(f"\n  Config #{rank+1}: {tname} L={eng.ma_length} TF={eng.tfactor:.2f} S={eng.sensitivity}")
             try:
-                # FIXED: run_walk_forward(ohlcv, eng, conf, tp, cfg)
                 wf = run_walk_forward(ohlcv, eng, conf, tp, wf_cfg)
                 oos_pf     = float(np.mean([r[R_PROFIT_FACTOR] for r in wf['oos_results']]))
                 oos_wr     = float(np.mean([r[R_WIN_RATE]      for r in wf['oos_results']]))
@@ -187,7 +176,7 @@ def main():
                 is_pf      = float(np.mean([r[R_PROFIT_FACTOR] for r in wf['is_results']]))
                 robustness = oos_pf / max(is_pf, 0.01)
                 status = (
-                    "ROBUST"  if robustness > 0.60 and oos_pf > 1.0
+                    "ROBUST"   if robustness > 0.60 and oos_pf > 1.0
                     else "FRAGILE" if oos_pf > 1.0
                     else "OVERFIT"
                 )
@@ -280,7 +269,8 @@ def main():
     )
 
     tname = TRIG_NAMES[best_eng.trigger_type]
-    if best_eng.trigger_type == 0: tname = MA_NAMES[best_eng.ma_type]
+    if best_eng.trigger_type == 0:
+        tname = MA_NAMES[best_eng.ma_type]
 
     print(f"\n{'='*80}")
     print(f"  BEST RESULT (source: {best_source})")
