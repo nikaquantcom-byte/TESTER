@@ -6,6 +6,7 @@ import numpy as np
 import math
 import time
 import pickle
+import pandas as pd
 from multiprocessing import Pool, cpu_count
 
 from .t3_engine import (
@@ -23,9 +24,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from nika_optimizer.backtest_engine_v2 import (
-    run_backtest, make_trade_params, NUM_RESULTS,
+    run_backtest, make_trade_params, NUM_RESULTS, RESULT_NAMES,
     R_PROFIT_FACTOR, R_WIN_RATE, R_MAX_DRAWDOWN_PCT,
     R_TOTAL_TRADES, R_NET_PROFIT, R_EXPECTANCY, R_SHARPE,
+    R_RECOVERY_FACTOR, R_CALMAR, R_AVG_BARS_HELD,
+    R_MAX_CONSEC_LOSS,
 )
 from nika_optimizer.signals_v3 import (
     atr_calc as atr_calc_v3,
@@ -210,35 +213,96 @@ def run_t3_tournament(ohlcv, n_cores=None, quick=False):
 
 
 # ---------------------------------------------------------------------------
+# Results → DataFrame + CSV
+# ---------------------------------------------------------------------------
+
+def results_to_df(results):
+    """Convert list of (T3Config, results_array, score) to a flat DataFrame."""
+    rows = []
+    for cfg, res, score in results:
+        struct = STRUCT_NAMES[cfg.structure]
+        src    = SOURCE_NAMES[cfg.src_id] if cfg.structure != STRUCT_OF_IND else IND_INPUT_NAMES[cfg.ind_input]
+        mode   = MODE_NAMES[cfg.signal_mode]
+
+        row = {
+            # Score
+            'score':          round(score, 4),
+            # Structure
+            'structure':      struct,
+            'source':         src,
+            'signal_mode':    mode,
+            'cross_type':     cfg.cross_type,
+            # T3 params
+            'slow_len':       cfg.slow_len,
+            'slow_vf':        cfg.slow_vf,
+            'fast_len':       cfg.fast_len,
+            'fast_vf':        cfg.fast_vf,
+            'mid_len':        cfg.mid_len,
+            'mid_vf':         cfg.mid_vf,
+            'sensitivity':    cfg.sensitivity,
+            # Indicator input (STRUCT_OF_IND only)
+            'ind_input':      IND_INPUT_NAMES[cfg.ind_input] if cfg.structure == STRUCT_OF_IND else '',
+            'ind_period':     cfg.ind_period if cfg.structure == STRUCT_OF_IND else 0,
+            # Backtest metrics
+            'profit_factor':  round(float(res[R_PROFIT_FACTOR]),  4),
+            'win_rate':       round(float(res[R_WIN_RATE]),        2),
+            'trades':         int(res[R_TOTAL_TRADES]),
+            'net_profit':     round(float(res[R_NET_PROFIT]),      4),
+            'expectancy':     round(float(res[R_EXPECTANCY]),      4),
+            'max_dd_pct':     round(float(res[R_MAX_DRAWDOWN_PCT]),2),
+            'sharpe':         round(float(res[R_SHARPE]),          4),
+            'recovery_factor':round(float(res[R_RECOVERY_FACTOR]),4),
+            'calmar':         round(float(res[R_CALMAR]),          4),
+            'avg_bars_held':  round(float(res[R_AVG_BARS_HELD]),   1),
+            'max_consec_loss':int(res[R_MAX_CONSEC_LOSS]),
+        }
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def save_csv(results, path):
+    """Save full results to CSV — every combo, all metrics, all params."""
+    df = results_to_df(results)
+    df.to_csv(path, index=False)
+    print(f"  CSV saved: {path} ({len(df):,} rows)")
+    return df
+
+
+# ---------------------------------------------------------------------------
 # Save / Load / Print
 # ---------------------------------------------------------------------------
 
 def save_results(data, path):
     with open(path, 'wb') as f: pickle.dump(data, f)
-    print(f"  Saved: {path}")
+    print(f"  PKL saved: {path}")
 
 def load_results(path):
     with open(path, 'rb') as f: return pickle.load(f)
 
 def print_top(results, top_n=30):
-    print(f"\n{'='*110}")
+    print(f"\n{'='*120}")
     print(f"  TOP {top_n} T3 TOURNAMENT RESULTS")
-    print(f"{'='*110}")
-    hdr = f"  {'#':>3} | {'Score':>7} | {'PF':>6} | {'WR%':>5} | {'Trades':>7} | "\
-          f"{'DD%':>6} | {'Structure':>12} | {'Source':>10} | {'Mode':>10} | Config"
+    print(f"{'='*120}")
+    hdr = (f"  {'#':>3} | {'Score':>7} | {'PF':>6} | {'WR%':>5} | {'Trades':>7} | "
+           f"{'DD%':>6} | {'Sharpe':>6} | {'Structure':>12} | {'Source':>10} | {'Mode':>10} | Config")
     print(hdr)
-    print(f"  {'-'*110}")
+    print(f"  {'-'*120}")
     for i, (cfg, res, score) in enumerate(results[:top_n]):
         struct = STRUCT_NAMES[cfg.structure]
         src    = SOURCE_NAMES[cfg.src_id] if cfg.structure != STRUCT_OF_IND else IND_INPUT_NAMES[cfg.ind_input]
         mode   = MODE_NAMES[cfg.signal_mode]
-        if cfg.structure == STRUCT_SINGLE or cfg.structure == STRUCT_OF_IND:
+        if cfg.structure in (STRUCT_SINGLE, STRUCT_OF_IND):
             detail = f"L={cfg.slow_len} VF={cfg.slow_vf:.1f} S={cfg.sensitivity}"
         elif cfg.structure == STRUCT_CROSS:
-            detail = f"slow={cfg.slow_len}(vf={cfg.slow_vf:.1f}) fast={cfg.fast_len}(vf={cfg.fast_vf:.1f}) ct={cfg.cross_type} S={cfg.sensitivity}"
+            detail = (f"slow={cfg.slow_len}(vf={cfg.slow_vf:.1f}) "
+                      f"fast={cfg.fast_len}(vf={cfg.fast_vf:.1f}) "
+                      f"ct={cfg.cross_type} S={cfg.sensitivity}")
         else:
-            detail = f"fast={cfg.fast_len} mid={cfg.mid_len} slow={cfg.slow_len} vf=({cfg.fast_vf:.1f}/{cfg.mid_vf:.1f}/{cfg.slow_vf:.1f}) S={cfg.sensitivity}"
-        print(f"  {i+1:>3} | {score:7.1f} | {res[R_PROFIT_FACTOR]:6.2f} | {res[R_WIN_RATE]:5.1f} | "
-              f"{int(res[R_TOTAL_TRADES]):>7} | {res[R_MAX_DRAWDOWN_PCT]:6.1f} | "
+            detail = (f"fast={cfg.fast_len} mid={cfg.mid_len} slow={cfg.slow_len} "
+                      f"vf=({cfg.fast_vf:.1f}/{cfg.mid_vf:.1f}/{cfg.slow_vf:.1f}) "
+                      f"S={cfg.sensitivity}")
+        print(f"  {i+1:>3} | {score:7.1f} | {res[R_PROFIT_FACTOR]:6.2f} | "
+              f"{res[R_WIN_RATE]:5.1f} | {int(res[R_TOTAL_TRADES]):>7} | "
+              f"{res[R_MAX_DRAWDOWN_PCT]:6.1f} | {res[R_SHARPE]:6.3f} | "
               f"{struct:>12} | {src:>10} | {mode:>10} | {detail}")
-    print(f"{'='*110}")
+    print(f"{'='*120}")
