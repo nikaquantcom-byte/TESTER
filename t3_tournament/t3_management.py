@@ -57,7 +57,7 @@ def generate_management_combos(n_top_phase2):
                 for tr in TRAIL_MULTS:
                     for be in BE_TRIGGERS:
                         if be > 0 and sl == 0: continue  # BE needs reference SL
-                        for mat in MATURITY:
+                        for mat in MATURITIES:
                             combos.append(MgmtConfig(
                                 phase2_idx=idx,
                                 atr_sl_mult=sl,
