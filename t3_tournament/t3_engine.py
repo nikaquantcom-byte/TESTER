@@ -58,6 +58,9 @@ IND_LINREG = 7
 NUM_IND_INPUTS = 8
 IND_INPUT_NAMES = ['RSI','TSI','ATR','ADX','DI_Diff','Volume','Momentum','LinReg']
 
+# Modes where sensitivity has NO effect (always deduplicate to sens=1)
+MODES_SENSITIVITY_INACTIVE = {MODE_ZERO_CROSS, MODE_PRICE_CROSS, MODE_CROSSOVER}
+
 
 # ---------------------------------------------------------------------------
 # Core Numba kernels
@@ -240,11 +243,11 @@ def compute_signal_mode(line, close_src, sensitivity, mode):
         for i in range(sensitivity, n):
             if line[i] > line[i - sensitivity]: buy[i]  = True
             else:                                sell[i] = True
-    elif mode == 2:  # PRICE_CROSS
+    elif mode == 2:  # PRICE_CROSS — sensitivity inactive
         for i in range(1, n):
             if close_src[i] > line[i] and close_src[i-1] <= line[i-1]: buy[i]  = True
             if close_src[i] < line[i] and close_src[i-1] >= line[i-1]: sell[i] = True
-    elif mode == 4:  # ZERO_CROSS
+    elif mode == 4:  # ZERO_CROSS — sensitivity inactive
         for i in range(1, n):
             if line[i] > 0 and line[i-1] <= 0: buy[i]  = True
             if line[i] < 0 and line[i-1] >= 0: sell[i] = True
@@ -394,6 +397,9 @@ def generate_single_combos():
                 for sens in SENSITIVITIES:
                     if sens >= sl: continue
                     for mode in SINGLE_MODES:
+                        # ZeroCross and PriceCross: sensitivity inactive — only generate sens=1
+                        if mode in MODES_SENSITIVITY_INACTIVE and sens != 1:
+                            continue
                         combos.append(T3Config(
                             structure=STRUCT_SINGLE, src_id=src,
                             slow_len=sl, slow_vf=vf,
@@ -415,6 +421,9 @@ def generate_crossover_combos():
                     for fvf in VFACTORS:
                         for sens in SENSITIVITIES:
                             for ct in CROSS_TYPES:
+                                # ct=0 (standard crossover): sensitivity inactive — only sens=1
+                                if ct == 0 and sens != 1:
+                                    continue
                                 combos.append(T3Config(
                                     structure=STRUCT_CROSS, src_id=src,
                                     slow_len=sl, slow_vf=svf,
@@ -437,6 +446,9 @@ def generate_triple_combos():
                     for pvf in PYRAMID_VF:
                         for sens in SENSITIVITIES:
                             for mode in [MODE_FLIP, MODE_SLOPE, MODE_CROSSOVER]:
+                                # CROSSOVER mode: sensitivity inactive — only sens=1
+                                if mode == MODE_CROSSOVER and sens != 1:
+                                    continue
                                 combos.append(T3Config(
                                     structure=STRUCT_TRIPLE, src_id=src,
                                     slow_len=sl, slow_vf=pvf[2],
@@ -457,6 +469,9 @@ def generate_t3_of_indicator_combos():
                     for sens in SENSITIVITIES:
                         if sens >= sl: continue
                         for mode in SINGLE_MODES:
+                            # ZeroCross and PriceCross: sensitivity inactive — only sens=1
+                            if mode in MODES_SENSITIVITY_INACTIVE and sens != 1:
+                                continue
                             combos.append(T3Config(
                                 structure=STRUCT_OF_IND, src_id=SRC_CLOSE,
                                 slow_len=sl, slow_vf=vf,
@@ -519,7 +534,6 @@ def compute_t3_signals(cfg, open_, high, low, close, volume):
         elif cfg.signal_mode == MODE_SLOPE:
             buy, sell = compute_signal_mode(slow_t3, close_src, cfg.sensitivity, MODE_SLOPE)
         else:
-            # FLIP on slow, but only when fast and mid agree
             buy_s,  sell_s  = compute_signal_mode(slow_t3, close_src, cfg.sensitivity, MODE_FLIP)
             buy_fm, sell_fm = compute_crossover(fast_t3, mid_t3)
             buy  = buy_s  & (fast_t3 > mid_t3)

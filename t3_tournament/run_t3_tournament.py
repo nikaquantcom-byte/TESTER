@@ -14,6 +14,9 @@ from nika_optimizer.data_loader import load_ohlcv
 from .t3_grid_search import (
     run_t3_tournament, save_results, load_results, print_top, save_csv,
 )
+from nika_optimizer.backtest_engine_v2 import (
+    R_PROFIT_FACTOR, R_WIN_RATE, R_TOTAL_TRADES,
+)
 
 
 def main():
@@ -38,7 +41,6 @@ def main():
     print("=" * 80)
 
     print(f"\n[Data] Loading {args.data}...")
-    from nika_optimizer.data_loader import load_ohlcv
     df = load_ohlcv(args.data, sep=args.sep)
     ohlcv = {
         'open':   df['open'].values.astype(np.float64),
@@ -56,11 +58,9 @@ def main():
         results = load_results(args.load)
     else:
         results = run_t3_tournament(ohlcv, n_cores=n_cores, quick=args.quick)
-        # Always save PKL
         pkl_path = f"{args.output}/t3_results.pkl"
         save_results(results, pkl_path)
 
-    # Always save CSV (unless --no-csv)
     if not args.no_csv:
         csv_path = f"{args.output}/t3_results.csv"
         save_csv(results, csv_path)
@@ -72,9 +72,9 @@ def main():
     best_cfg, best_res, best_score = results[0]
     print(f"\n  Total time:  {elapsed/60:.1f} min")
     print(f"  Best score:  {best_score:.2f}")
-    print(f"  Best PF:     {best_res[0]:.3f}")
-    print(f"  Best WR:     {best_res[3]:.1f}%")
-    print(f"  Best trades: {int(best_res[0])}")
+    print(f"  Best PF:     {best_res[R_PROFIT_FACTOR]:.3f}")   # FIXED
+    print(f"  Best WR:     {best_res[R_WIN_RATE]:.1f}%")
+    print(f"  Best trades: {int(best_res[R_TOTAL_TRADES])}")
     print()
 
 
