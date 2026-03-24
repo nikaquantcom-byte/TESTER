@@ -14,7 +14,7 @@ from .t3_engine import (
     compute_t3_signals,
     STRUCT_NAMES, SOURCE_NAMES, MODE_NAMES, IND_INPUT_NAMES,
     STRUCT_SINGLE, STRUCT_CROSS, STRUCT_TRIPLE, STRUCT_OF_IND,
-    _ema, _rma, _sma, _t3, heiken_ashi, atr_calc, rsi_calc,
+    _ema, _rma, _sma, _t3, atr_calc, rsi_calc,
     tsi_val, adx_di, compute_signal_mode, compute_crossover,
     compute_crossover_slope_confirm, compute_crossover_accel_confirm,
 )
@@ -115,7 +115,6 @@ def _warmup():
     z = np.ones(200, dtype=np.float64)
     h = z * 1.1; l = z * 0.9
     _ema(z, 5); _rma(z, 5); _sma(z, 5); _t3(z, 5, 0.7)
-    heiken_ashi(z, h, l, z)
     atr_calc(h, l, z, 5)
     rsi_calc(z, 5)
     tsi_val(z, 5, 13, 8)
