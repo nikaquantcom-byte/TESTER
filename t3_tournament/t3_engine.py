@@ -1,7 +1,7 @@
 # T3 Tournament Engine
 # All T3 combo generation + signal computation
 # Structures: Single, Crossover, Triple, T3-of-Indicator
-# Inputs: 12 price sources x 2 HA modes
+# Sources: Close (0), HLC3/Typical (1)
 # Parameters: length x vfactor x sensitivity x signal_mode
 
 import numpy as np
@@ -10,25 +10,12 @@ from typing import NamedTuple
 
 
 # ---------------------------------------------------------------------------
-# Price source constants
+# Price source constants — Close and Typical (HLC3) only
 # ---------------------------------------------------------------------------
-SRC_CLOSE     = 0
-SRC_OPEN      = 1
-SRC_HIGH      = 2
-SRC_LOW       = 3
-SRC_HL2       = 4
-SRC_HLC3      = 5
-SRC_OHLC4     = 6
-SRC_WEIGHTED  = 7   # (H+L+C+C)/4
-SRC_HA_CLOSE  = 8
-SRC_HA_HL2    = 9
-SRC_HA_HLC3   = 10
-SRC_HA_OHLC4  = 11
-NUM_SOURCES   = 12
-SOURCE_NAMES  = [
-    'Close','Open','High','Low','HL2','HLC3','OHLC4','Weighted',
-    'HA_Close','HA_HL2','HA_HLC3','HA_OHLC4'
-]
+SRC_CLOSE    = 0
+SRC_HLC3     = 1
+NUM_SOURCES  = 2
+SOURCE_NAMES = ['Close', 'HLC3']
 
 # Structure constants
 STRUCT_SINGLE     = 0
@@ -111,24 +98,6 @@ def _gd(src, period, vf):
 @njit
 def _t3(src, period, vf):
     return _gd(_gd(_gd(src, period, vf), period, vf), period, vf)
-
-@njit
-def heiken_ashi(o, h, l, c):
-    n = len(c)
-    ha_o = np.empty(n, dtype=np.float64)
-    ha_h = np.empty(n, dtype=np.float64)
-    ha_l = np.empty(n, dtype=np.float64)
-    ha_c = np.empty(n, dtype=np.float64)
-    ha_o[0] = o[0]
-    ha_c[0] = (o[0] + h[0] + l[0] + c[0]) / 4.0
-    ha_h[0] = h[0]
-    ha_l[0] = l[0]
-    for i in range(1, n):
-        ha_o[i] = (ha_o[i-1] + ha_c[i-1]) / 2.0
-        ha_c[i] = (o[i] + h[i] + l[i] + c[i]) / 4.0
-        ha_h[i] = max(h[i], max(ha_o[i], ha_c[i]))
-        ha_l[i] = min(l[i], min(ha_o[i], ha_c[i]))
-    return ha_o, ha_h, ha_l, ha_c
 
 @njit
 def atr_calc(h, l, c, period):
@@ -300,23 +269,14 @@ def compute_crossover_accel_confirm(fast, slow, sensitivity):
 
 
 # ---------------------------------------------------------------------------
-# Price source builder
+# Price source builder — Close and HLC3 (Typical) only
 # ---------------------------------------------------------------------------
 
 def get_price_source(open_, high, low, close, src_id):
-    if src_id == SRC_CLOSE:    return close
-    if src_id == SRC_OPEN:     return open_
-    if src_id == SRC_HIGH:     return high
-    if src_id == SRC_LOW:      return low
-    if src_id == SRC_HL2:      return (high + low) / 2.0
-    if src_id == SRC_HLC3:     return (high + low + close) / 3.0
-    if src_id == SRC_OHLC4:    return (open_ + high + low + close) / 4.0
-    if src_id == SRC_WEIGHTED: return (high + low + close * 2.0) / 4.0
-    ha_o, ha_h, ha_l, ha_c = heiken_ashi(open_, high, low, close)
-    if src_id == SRC_HA_CLOSE:  return ha_c
-    if src_id == SRC_HA_HL2:    return (ha_h + ha_l) / 2.0
-    if src_id == SRC_HA_HLC3:   return (ha_h + ha_l + ha_c) / 3.0
-    if src_id == SRC_HA_OHLC4:  return (ha_o + ha_h + ha_l + ha_c) / 4.0
+    if src_id == SRC_CLOSE:
+        return close
+    if src_id == SRC_HLC3:
+        return (high + low + close) / 3.0
     return close
 
 
@@ -397,7 +357,6 @@ def generate_single_combos():
                 for sens in SENSITIVITIES:
                     if sens >= sl: continue
                     for mode in SINGLE_MODES:
-                        # ZeroCross and PriceCross: sensitivity inactive — only generate sens=1
                         if mode in MODES_SENSITIVITY_INACTIVE and sens != 1:
                             continue
                         combos.append(T3Config(
@@ -421,7 +380,6 @@ def generate_crossover_combos():
                     for fvf in VFACTORS:
                         for sens in SENSITIVITIES:
                             for ct in CROSS_TYPES:
-                                # ct=0 (standard crossover): sensitivity inactive — only sens=1
                                 if ct == 0 and sens != 1:
                                     continue
                                 combos.append(T3Config(
@@ -446,7 +404,6 @@ def generate_triple_combos():
                     for pvf in PYRAMID_VF:
                         for sens in SENSITIVITIES:
                             for mode in [MODE_FLIP, MODE_SLOPE, MODE_CROSSOVER]:
-                                # CROSSOVER mode: sensitivity inactive — only sens=1
                                 if mode == MODE_CROSSOVER and sens != 1:
                                     continue
                                 combos.append(T3Config(
@@ -469,7 +426,6 @@ def generate_t3_of_indicator_combos():
                     for sens in SENSITIVITIES:
                         if sens >= sl: continue
                         for mode in SINGLE_MODES:
-                            # ZeroCross and PriceCross: sensitivity inactive — only sens=1
                             if mode in MODES_SENSITIVITY_INACTIVE and sens != 1:
                                 continue
                             combos.append(T3Config(
@@ -507,7 +463,7 @@ def compute_t3_signals(cfg, open_, high, low, close, volume):
         close_src = close
     else:
         src = get_price_source(open_, high, low, close, cfg.src_id)
-        close_src = src if cfg.src_id in (SRC_CLOSE, SRC_HA_CLOSE) else close
+        close_src = close if cfg.src_id != SRC_CLOSE else close
 
     if cfg.structure == STRUCT_SINGLE or cfg.structure == STRUCT_OF_IND:
         main_line = _t3(src, cfg.slow_len, cfg.slow_vf)
